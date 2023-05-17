@@ -1,0 +1,21 @@
+<html>
+<head>
+    <title>ESPAsyncWebServer</title>
+</head>
+<body>
+    <h1>Hello!</h1>
+    <form>
+        <label for="options">Select an option:</label>
+        <select id="options" name="options">{OPTIONS}</select>
+        <button type="button" onclick="sendSelection()">Send Selection</button>
+    </form>
+    <script>
+        function sendSelection() {
+            var option = document.getElementById('options').value;
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', '/select?option=' + option);
+            xhr.send();
+        }
+    </script>
+</body>
+</html>
