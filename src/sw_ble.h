@@ -1,4 +1,3 @@
-
 #include <Arduino.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -6,11 +5,12 @@
 #include <BLE2902.h>
 
 BLECharacteristic *pCharacteristic;
+BLEServer *pServer;
 
 void setup_Ble()
 {
     BLEDevice::init("ESP32");
-    BLEServer *pServer = BLEDevice::createServer();
+    pServer = BLEDevice::createServer();
     BLEService *pService = pServer->createService(BLEUUID((uint16_t)0x180F));
 
     pCharacteristic = pService->createCharacteristic(
@@ -27,7 +27,9 @@ void setup_Ble()
 
 void Send_BleMessage(String msg)
 {
-    msg = "Hello, World!";
-    pCharacteristic->setValue(msg.c_str());
-    pCharacteristic->notify();
+    if (pServer->getConnectedCount() > 0)
+    {
+        pCharacteristic->setValue(msg.c_str());
+        pCharacteristic->notify();
+    }
 }
