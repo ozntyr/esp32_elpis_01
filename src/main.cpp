@@ -16,9 +16,6 @@
 
 #pragma region definitions
 
-#define MSG_BUFFER_SIZE (50)
-char msg[MSG_BUFFER_SIZE];
-
 int pin_led = 2;
 int pin_dht11 = 23;
 
@@ -285,6 +282,9 @@ void publish_Message(const char *topic, String payload, boolean retained)
 #include <BLEUtils.h>
 #include <BLE2902.h>
 
+#define MSG_BUFFER_SIZE (50)
+char msg_ble[MSG_BUFFER_SIZE];
+
 BLECharacteristic *pCharacteristic;
 BLEServer *pServer;
 
@@ -306,11 +306,11 @@ void setup_Ble()
   pServer->getAdvertising()->start();
 }
 
-void Send_BleMessage(String msg)
+void Send_BleMessage(String msg_ble)
 {
   if (pServer->getConnectedCount() > 0)
   {
-    pCharacteristic->setValue(msg.c_str());
+    pCharacteristic->setValue(msg_ble.c_str());
     pCharacteristic->notify();
   }
 }
@@ -458,6 +458,8 @@ void stopHumidifier()
 
 #pragma endregion
 
+#pragma region process messages
+
 void setup_Serial()
 {
   Serial.begin(115200);
@@ -465,6 +467,10 @@ void setup_Serial()
   while (!Serial)
     delay(1);
 }
+
+#pragma endregion
+
+#pragma region Tasks
 
 void Task_PushAll(void *parameter)
 {
@@ -550,6 +556,10 @@ void Task_Dht11Sensor(void *parameter)
   }
 }
 
+#pragma endregion
+
+#pragma region Arduino stuff
+
 void setup()
 {
   setup_Serial();
@@ -587,3 +597,5 @@ void setup()
 void loop()
 {
 }
+
+#pragma endregion
