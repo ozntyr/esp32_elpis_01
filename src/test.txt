@@ -8,11 +8,11 @@
 
 #include <DHT.h>
 #include <GP2YDustSensor.h>
-#include <driver/ledc.h>
 
 #include "sw_fs.h"
 #include "sw_wifi.h"
-#include "sw_ble.h"
+
+unsigned long lastMsg = 0;
 
 #define MSG_BUFFER_SIZE (50)
 char msg[MSG_BUFFER_SIZE];
@@ -32,18 +32,12 @@ int dly_dust = 1000;
 float sens_temperature = 0;
 float sens_humidity = 0;
 float sens_dust_pm25 = 0;
-
-float sens_dust_pm10;
-float sens_VOCs;
-float sens_CO2;
-
 int command1 = 0;
 
 const uint8_t SHARP_LED_PIN = 32; // Sharp Dust/particle sensor Led Pin
 const uint8_t SHARP_VO_PIN = 36;  // Sharp Dust/particle analog out pin used for reading
 
 GP2YDustSensor dustSensor(GP2YDustSensorType::GP2Y1010AU0F, SHARP_LED_PIN, SHARP_VO_PIN);
-
 char logBuffer[255];
 
 void setup_Serial()
@@ -52,100 +46,6 @@ void setup_Serial()
 
   while (!Serial)
     delay(1);
-}
-
-#pragma region PWM Outputs
-
-// Constants for fan and humidifier channels and GPIO pins
-const int FAN_CHANNEL = 0;
-const int FAN_PIN = 12;
-const int HUMIDIFIER_CHANNEL = 1;
-const int HUMIDIFIER_PIN = 14;
-
-// Variables for fan and humidifier control
-int fanSpeed = 0;            // Range: 0-255
-int humidifierIntensity = 0; // Range: 0-255
-
-// LEDC configuration variables
-int ledcFrequency = 5000; // Frequency in Hz
-int ledcResolution = 8;   // Bit resolution (0-15)
-
-void setup_ledc()
-{
-  // Initialize LEDC library
-  ledcSetup(FAN_CHANNEL, ledcFrequency, ledcResolution);        // Fan channel
-  ledcSetup(HUMIDIFIER_CHANNEL, ledcFrequency, ledcResolution); // Humidifier channel
-
-  // Attach GPIO pins to LEDC channels
-  ledcAttachPin(FAN_PIN, FAN_CHANNEL);
-  ledcAttachPin(HUMIDIFIER_PIN, HUMIDIFIER_CHANNEL);
-
-  // Other setup code...
-}
-
-// Function to start the fan
-void startFan()
-{
-  fanSpeed = 255; // Set fan speed to maximum
-}
-
-// Function to stop the fan
-void stopFan()
-{
-  fanSpeed = 0; // Set fan speed to 0 (off)
-}
-
-// Function to start the humidifier
-void startHumidifier()
-{
-  humidifierIntensity = 128; // Set humidifier intensity to half
-}
-
-// Function to stop the humidifier
-void stopHumidifier()
-{
-  humidifierIntensity = 0; // Set humidifier intensity to 0 (off)
-}
-
-#pragma endregion
-
-void Task_PushAll(void *parameter)
-{
-  (void)parameter;
-
-  for (;;)
-  {
-
-    if (!client.connected())
-      reconnect();
-    client.loop();
-
-    if (isnan(sens_temperature) || isnan(sens_humidity))
-    {
-      Serial.println(F("Failed to read from DHT sensor!"));
-    }
-    else
-    {
-      Serial.printf("sen1: %f | sen2: %f \n", sens_temperature, sens_humidity);
-      publish_Message(sens_temperature_topic, String(sens_temperature), true);
-      publish_Message(sens_humidity_topic, String(sens_humidity), true);
-    }
-    if (isnan(sens_dust_pm25))
-    {
-      Serial.println(F("Failed to read from Dust sensor!"));
-    }
-    else
-    {
-      Serial.printf("sen3: %f \n", sens_dust_pm25);
-      publish_Message(sens_dust_pm25_topic, String(sens_dust_pm25), true);
-    }
-
-    // Control the fan and humidifier based on the variables
-    ledcWrite(FAN_CHANNEL, fanSpeed);
-    ledcWrite(HUMIDIFIER_CHANNEL, humidifierIntensity);
-
-    vTaskDelay(pdMS_TO_TICKS(dly_loop));
-  }
 }
 
 void Task_DustSensor(void *parameter)
@@ -221,7 +121,6 @@ void setup()
 
   xTaskCreate(Task_DustSensor, "Task_dustSensor", 4096, NULL, 10, NULL);
   xTaskCreate(Task_Dht11Sensor, "Task_dht11Sensor", 4096, NULL, 15, NULL);
-  xTaskCreate(Task_PushAll, "Task_PushAll", 4096, NULL, 20, NULL);
 
   Serial.println("Setup Done!");
   delay(3000);
@@ -229,4 +128,34 @@ void setup()
 
 void loop()
 {
+
+  if (!client.connected())
+    reconnect();
+  client.loop();
+
+  //---- example: how to publish sensor values every 5 sec
+  unsigned long now = millis();
+  if (now - lastMsg > dly_loop)
+  {
+    lastMsg = now;
+    if (isnan(sens_temperature) || isnan(sens_humidity))
+    {
+      Serial.println(F("Failed to read from DHT sensor!"));
+    }
+    else
+    {
+      Serial.printf("sen1: %f | sen2: %f \n", sens_temperature, sens_humidity);
+      publish_Message(sens_temperature_topic, String(sens_temperature), true);
+      publish_Message(sens_humidity_topic, String(sens_humidity), true);
+    }
+    if (isnan(sens_dust_pm25))
+    {
+      Serial.println(F("Failed to read from Dust sensor!"));
+    }
+    else
+    {
+      Serial.printf("sen3: %f \n", sens_dust_pm25);
+      publish_Message(sens_dust_pm25_topic, String(sens_dust_pm25), true);
+    }
+  }
 }
