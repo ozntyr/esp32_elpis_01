@@ -1,10 +1,3 @@
-/*
- * Virtuino MQTT getting started example
- * Broker: HiveMQ (Secure connection)
- * Supported boards: ESP8266 / ESP32
- * Created by Ilias Lamprou
- * Jul 13 2021
- */
 
 #include <Arduino.h>
 
@@ -14,7 +7,7 @@
 
 #include "sw_fs.h"
 
-#pragma region definitions
+#pragma region Variable and Constant Definitions
 
 int pin_led = 2;
 int pin_dht11 = 23;
@@ -47,14 +40,14 @@ char logBuffer[255];
 
 #pragma endregion
 
-#pragma region wifi stuff
+#pragma region WiFi
 
 #include <PubSubClient.h>
 #include <WiFiClientSecure.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 
-#pragma region mqtt_cert
+#pragma region MQTT Certificate
 
 static const char *root_ca PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
@@ -239,32 +232,9 @@ void reconnect()
   }
 }
 
-void callback(char *topic, byte *payload, unsigned int length)
+void mqttCallback(char *topic, byte *payload, unsigned int length)
 {
-  String incommingMessage = "";
-  for (int i = 0; i < length; i++)
-    incommingMessage += (char)payload[i];
-
-  Serial.println("Message arrived [" + String(topic) + "]" + incommingMessage);
-
-  //--- check the incomming message
-  if (strcmp(topic, command1_topic) == 0)
-  {
-    if (incommingMessage.equals("1"))
-    {
-      // digitalWrite(pin_led, LOW); // Turn the LED on
-    }
-    else
-    {
-      // digitalWrite(pin_led, HIGH); // Turn the LED off
-    }
-  }
-
-  //  check for other commands
-  /*  else  if( strcmp(topic,command2_topic) == 0){
-      if (incommingMessage.equals("1")) {  } // do something else
-   }
-   */
+  processMessages(topic, payload, length);
 }
 
 void publish_Message(const char *topic, String payload, boolean retained)
@@ -275,7 +245,7 @@ void publish_Message(const char *topic, String payload, boolean retained)
 
 #pragma endregion
 
-#pragma region BLE stuff
+#pragma region BLE
 
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -468,6 +438,34 @@ void setup_Serial()
     delay(1);
 }
 
+void processMessages(char *topic, byte *payload, unsigned int length)
+{
+  String incommingMessage = "";
+  for (int i = 0; i < length; i++)
+    incommingMessage += (char)payload[i];
+
+  Serial.println("Message arrived [" + String(topic) + "]" + incommingMessage);
+
+  //--- check the incomming message
+  if (strcmp(topic, command1_topic) == 0)
+  {
+    if (incommingMessage.equals("1"))
+    {
+      // digitalWrite(pin_led, LOW); // Turn the LED on
+    }
+    else
+    {
+      // digitalWrite(pin_led, HIGH); // Turn the LED off
+    }
+  }
+
+  //  check for other commands
+  /*  else  if( strcmp(topic,command2_topic) == 0){
+      if (incommingMessage.equals("1")) {  } // do something else
+   }
+   */
+}
+
 #pragma endregion
 
 #pragma region Tasks
@@ -558,7 +556,7 @@ void Task_Dht11Sensor(void *parameter)
 
 #pragma endregion
 
-#pragma region Arduino stuff
+#pragma region Arduino
 
 void setup()
 {
@@ -584,7 +582,7 @@ void setup()
 #endif
 
   client.setServer(mqtt_server, mqtt_port);
-  client.setCallback(callback);
+  client.setCallback(mqttCallback);
 
   xTaskCreate(Task_DustSensor, "Task_dustSensor", 4096, NULL, 10, NULL);
   xTaskCreate(Task_Dht11Sensor, "Task_dht11Sensor", 4096, NULL, 15, NULL);
