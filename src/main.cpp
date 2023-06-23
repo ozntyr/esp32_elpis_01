@@ -39,9 +39,9 @@ GP2YDustSensor dustSensor(GP2YDustSensorType::GP2Y1010AU0F, SHARP_LED_PIN, SHARP
 char logBuffer[255];
 
 // Topics for sending sensor readings
-const char *tr_temperature = "Readings/sens_temperature";
-const char *tr_humidity = "Readings/sens_humidity";
-const char *tr_dust_pm25 = "Readings/sens_dust_pm25";
+const char *tr_temperature = "Readings/Temperature";
+const char *tr_humidity = "Readings/Humidity";
+const char *tr_dust_pm25 = "Readings/PM25";
 
 // Topics for receiving commands
 const char *tc_stop_all = "Commands/StopAll";
