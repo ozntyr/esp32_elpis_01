@@ -38,6 +38,173 @@ GP2YDustSensor dustSensor(GP2YDustSensorType::GP2Y1010AU0F, SHARP_LED_PIN, SHARP
 
 char logBuffer[255];
 
+// Topics for sending sensor readings
+const char *tr_temperature = "Readings/sens_temperature";
+const char *tr_humidity = "Readings/sens_humidity";
+const char *tr_dust_pm25 = "Readings/sens_dust_pm25";
+
+// Topics for receiving commands
+const char *tc_stop_all = "Commands/StopAll";
+const char *tc_stop_fan = "Commands/StopFan";
+const char *tc_stop_humumidifier = "Commands/StopHumidifier";
+const char *tc_start_all = "Commands/StartAll";
+const char *tc_start_fan = "Commands/StartFan";
+const char *tc_start_humidifier = "Commands/StartHumidifier";
+const char *tc_set_mode = "Commands/SetMode";
+const char *tc_set_timer_date = "Commands/SetTimerDate";
+const char *tc_set_timer_duration = "Commands/SetTimerDuration";
+
+enum sw_modes
+{
+  MODE_MANUAL = 0,
+  MODE_AUTO,
+  MODE_SLEEP,
+  MODE_TURBO,
+  MODE_ENERYSAVE
+};
+
+sw_modes mode_current;
+
+#pragma endregion
+
+#pragma region PWM Outputs
+
+// Constants for fan and humidifier channels and GPIO pins
+const int FAN_CHANNEL = 0;
+const int FAN_PIN = 12;
+const int HUMIDIFIER_CHANNEL = 1;
+const int HUMIDIFIER_PIN = 14;
+
+// Variables for fan and humidifier control
+int fanSpeed = 0;            // Range: 0-255
+int humidifierIntensity = 0; // Range: 0-255
+
+int fanSpeedManual = 0;
+int humidifierIntensityManual = 0;
+
+// LEDC configuration variables
+int ledcFrequency = 5000; // Frequency in Hz
+int ledcResolution = 8;   // Bit resolution (0-15)
+
+void setup_ledc()
+{
+  // Initialize LEDC library
+  ledcSetup(FAN_CHANNEL, ledcFrequency, ledcResolution);        // Fan channel
+  ledcSetup(HUMIDIFIER_CHANNEL, ledcFrequency, ledcResolution); // Humidifier channel
+
+  // Attach GPIO pins to LEDC channels
+  ledcAttachPin(FAN_PIN, FAN_CHANNEL);
+  ledcAttachPin(HUMIDIFIER_PIN, HUMIDIFIER_CHANNEL);
+
+  // Other setup code...
+}
+
+// Function to start the fan
+void startFan(int speed)
+{
+  fanSpeed = speed; // Set fan speed to maximum
+}
+
+// Function to stop the fan
+void stopFan()
+{
+  fanSpeed = 0; // Set fan speed to 0 (off)
+}
+
+// Function to start the humidifier
+void startHumidifier(int intensity)
+{
+  humidifierIntensity = intensity; // Set humidifier intensity to half
+}
+
+// Function to stop the humidifier
+void stopHumidifier()
+{
+  humidifierIntensity = 0; // Set humidifier intensity to 0 (off)
+}
+
+#pragma endregion
+
+#pragma region process messages
+
+void setup_Serial()
+{
+  Serial.begin(115200);
+
+  while (!Serial)
+    delay(1);
+}
+
+void processMessages(char *topic, byte *payload, unsigned int length)
+{
+  String incommingMessage = "";
+  for (int i = 0; i < length; i++)
+    incommingMessage += (char)payload[i];
+
+  Serial.println("Message arrived [" + String(topic) + "]" + incommingMessage);
+
+  //--- check the incomming message
+  if (strcmp(topic, tc_stop_all) == 0)
+  {
+    stopFan();
+    stopHumidifier();
+  }
+  else if (strcmp(topic, tc_stop_fan) == 0)
+  {
+    stopFan();
+  }
+  else if (strcmp(topic, tc_stop_humumidifier) == 0)
+  {
+    stopHumidifier();
+  }
+  else if (strcmp(topic, tc_start_all) == 0)
+  {
+    startFan(fanSpeedManual);
+    startHumidifier(humidifierIntensityManual);
+
+    mode_current = sw_modes::MODE_MANUAL;
+  }
+  else if (strcmp(topic, tc_start_fan) == 0)
+  {
+    int speed = std::stoi(incommingMessage.c_str());
+    if (speed < 0 || speed > 255)
+      speed = 0;
+    fanSpeedManual = fanSpeedManual;
+    startFan(fanSpeedManual);
+    mode_current = sw_modes::MODE_MANUAL;
+  }
+  else if (strcmp(topic, tc_start_humidifier) == 0)
+  {
+    int intensity = std::stoi(incommingMessage.c_str());
+    if (intensity < 0 || intensity > 255)
+      intensity = 0;
+    humidifierIntensityManual = intensity;
+    startHumidifier(humidifierIntensityManual);
+    mode_current = sw_modes::MODE_MANUAL;
+  }
+  else if (strcmp(topic, tc_set_mode) == 0)
+  {
+    sw_modes mode = static_cast<sw_modes>(std::stoi(incommingMessage.c_str()));
+
+    if (mode >= sw_modes::MODE_MANUAL && mode <= sw_modes::MODE_ENERYSAVE && mode_current != mode)
+    {
+      mode_current = mode;
+    }
+  }
+  else if (strcmp(topic, tc_set_timer_date) == 0)
+  {
+    // TODO we need to add rtc
+  }
+  else if (strcmp(topic, tc_set_timer_duration) == 0)
+  {
+    // TODO we need to add rtc
+  }
+  else
+  {
+    // TODO?
+  }
+}
+
 #pragma endregion
 
 #pragma region WiFi
@@ -110,13 +277,6 @@ const int mqtt_port = 8883;
 WiFiClientSecure espClient; // for no secure connection use WiFiClient instead of WiFiClientSecure
 // WiFiClient espClient;
 PubSubClient client(espClient);
-
-const char *sens_temperature_topic = "encyclopedia/sens_temperature";
-const char *sens_humidity_topic = "encyclopedia/sens_humidity";
-const char *sens_dust_pm25_topic = "encyclopedia/sens_dust_pm25";
-
-const char *command1_topic = "encyclopedia/command1";
-// const char* command1_topic="command2";
 
 String indexHtml;
 
@@ -219,8 +379,15 @@ void reconnect()
     {
       Serial.println("connected");
 
-      client.subscribe(command1_topic); // subscribe the topics here
-                                        // client.subscribe(command2_topic);   // subscribe the topics here
+      client.subscribe(tc_stop_all);
+      client.subscribe(tc_stop_fan);
+      client.subscribe(tc_stop_humumidifier);
+      client.subscribe(tc_start_all);
+      client.subscribe(tc_start_fan);
+      client.subscribe(tc_start_humidifier);
+      client.subscribe(tc_set_mode);
+      client.subscribe(tc_set_timer_date);
+      client.subscribe(tc_set_timer_duration);
     }
     else
     {
@@ -305,7 +472,7 @@ float get_CO2();  // TODO
 
 int AQI_StandartValues[] = {50, 100, 150, 200, 300, 500};
 String AQI_StandartNames[] = {"Good", "Moderate", "Sensitive", "Unhealty", "Very Unhealty", "Hazardous"};
-int AQI_PPMValues[] = {12, 35.5, 55.5, 150.5, 250.5, 500.5};
+float AQI_PPMValues[] = {12, 35.5, 55.5, 150.5, 250.5, 500.5};
 int AQI_StandartLen = 6;
 
 int AQI_idx = 0;
@@ -373,102 +540,96 @@ void analyze_AirQuality_Trends();
 
 #pragma endregion
 
-#pragma region PWM Outputs
+#pragma region Tasks
 
-// Constants for fan and humidifier channels and GPIO pins
-const int FAN_CHANNEL = 0;
-const int FAN_PIN = 12;
-const int HUMIDIFIER_CHANNEL = 1;
-const int HUMIDIFIER_PIN = 14;
-
-// Variables for fan and humidifier control
-int fanSpeed = 0;            // Range: 0-255
-int humidifierIntensity = 0; // Range: 0-255
-
-// LEDC configuration variables
-int ledcFrequency = 5000; // Frequency in Hz
-int ledcResolution = 8;   // Bit resolution (0-15)
-
-void setup_ledc()
+void updateModeState()
 {
-  // Initialize LEDC library
-  ledcSetup(FAN_CHANNEL, ledcFrequency, ledcResolution);        // Fan channel
-  ledcSetup(HUMIDIFIER_CHANNEL, ledcFrequency, ledcResolution); // Humidifier channel
-
-  // Attach GPIO pins to LEDC channels
-  ledcAttachPin(FAN_PIN, FAN_CHANNEL);
-  ledcAttachPin(HUMIDIFIER_PIN, HUMIDIFIER_CHANNEL);
-
-  // Other setup code...
-}
-
-// Function to start the fan
-void startFan()
-{
-  fanSpeed = 255; // Set fan speed to maximum
-}
-
-// Function to stop the fan
-void stopFan()
-{
-  fanSpeed = 0; // Set fan speed to 0 (off)
-}
-
-// Function to start the humidifier
-void startHumidifier()
-{
-  humidifierIntensity = 128; // Set humidifier intensity to half
-}
-
-// Function to stop the humidifier
-void stopHumidifier()
-{
-  humidifierIntensity = 0; // Set humidifier intensity to 0 (off)
-}
-
-#pragma endregion
-
-#pragma region process messages
-
-void setup_Serial()
-{
-  Serial.begin(115200);
-
-  while (!Serial)
-    delay(1);
-}
-
-void processMessages(char *topic, byte *payload, unsigned int length)
-{
-  String incommingMessage = "";
-  for (int i = 0; i < length; i++)
-    incommingMessage += (char)payload[i];
-
-  Serial.println("Message arrived [" + String(topic) + "]" + incommingMessage);
-
-  //--- check the incomming message
-  if (strcmp(topic, command1_topic) == 0)
+  switch (mode_current)
   {
-    if (incommingMessage.equals("1"))
+  case sw_modes::MODE_AUTO:
+    if (AQI_PM25 <= AQI_StandartValues[0]) // 50
     {
-      // digitalWrite(pin_led, LOW); // Turn the LED on
+      startFan(64);
+      startHumidifier(64);
+    }
+    else if (AQI_PM25 <= AQI_StandartValues[1]) // 100
+    {
+      startFan(96);
+      startHumidifier(96);
+    }
+    else if (AQI_PM25 <= AQI_StandartValues[2]) // 150
+    {
+      startFan(128);
+      startHumidifier(128);
+    }
+    else // 150+
+    {
+      startFan(230);
+      startHumidifier(230);
+    }
+    break;
+  case sw_modes::MODE_SLEEP:
+    if (AQI_PM25 >= AQI_StandartValues[2]) // 150+
+    {
+      startFan(102);
+      startHumidifier(102);
     }
     else
     {
-      // digitalWrite(pin_led, HIGH); // Turn the LED off
+      startFan(51);
+      startHumidifier(51);
     }
+    break;
+  case sw_modes::MODE_TURBO:
+    if (AQI_PM25 <= AQI_StandartValues[0]) // 50
+    {
+      startFan(128);
+      startHumidifier(128);
+    }
+    else if (AQI_PM25 <= AQI_StandartValues[1]) // 100
+    {
+      startFan(160);
+      startHumidifier(160);
+    }
+    else if (AQI_PM25 <= AQI_StandartValues[2]) // 150
+    {
+      startFan(204);
+      startHumidifier(204);
+    }
+    else // 150+
+    {
+      startFan(244);
+      startHumidifier(244);
+    }
+    break;
+  case sw_modes::MODE_ENERYSAVE:
+    if (AQI_PM25 <= AQI_StandartValues[0]) // 50
+    {
+      startFan(51);
+      startHumidifier(51);
+    }
+    else if (AQI_PM25 <= AQI_StandartValues[1]) // 100
+    {
+      startFan(75);
+      startHumidifier(75);
+    }
+    else if (AQI_PM25 <= AQI_StandartValues[2]) // 150
+    {
+      startFan(90);
+      startHumidifier(90);
+    }
+    else // 150+
+    {
+      startFan(128);
+      startHumidifier(128);
+    }
+    break;
+  case sw_modes::MODE_MANUAL:
+  default:
+    // there should be no need for update on this part
+    break;
   }
-
-  //  check for other commands
-  /*  else  if( strcmp(topic,command2_topic) == 0){
-      if (incommingMessage.equals("1")) {  } // do something else
-   }
-   */
 }
-
-#pragma endregion
-
-#pragma region Tasks
 
 void Task_PushAll(void *parameter)
 {
@@ -488,8 +649,8 @@ void Task_PushAll(void *parameter)
     else
     {
       Serial.printf("sen1: %f | sen2: %f \n", sens_temperature, sens_humidity);
-      publish_Message(sens_temperature_topic, String(sens_temperature), true);
-      publish_Message(sens_humidity_topic, String(sens_humidity), true);
+      publish_Message(tr_temperature, String(sens_temperature), true);
+      publish_Message(tr_humidity, String(sens_humidity), true);
     }
     if (isnan(sens_dust_pm25))
     {
@@ -498,8 +659,11 @@ void Task_PushAll(void *parameter)
     else
     {
       Serial.printf("sen3: %f \n", sens_dust_pm25);
-      publish_Message(sens_dust_pm25_topic, String(sens_dust_pm25), true);
+      publish_Message(tr_dust_pm25, String(sens_dust_pm25), true);
     }
+
+    // Update mode state to calculate fan speed and humidifier intensity
+    updateModeState();
 
     // Control the fan and humidifier based on the variables
     ledcWrite(FAN_CHANNEL, fanSpeed);
