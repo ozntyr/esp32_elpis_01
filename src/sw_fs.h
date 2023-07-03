@@ -150,18 +150,18 @@ void read_SsidPasswords()
     while (file.available())
     {
         line = file.readStringUntil('\n');
-        Serial.println(line);
+        // Serial.println(line);
         line.trim();
         if (!line.isEmpty())
         {
             int colonIndex = line.indexOf(':');
-            Serial.println(colonIndex);
+            // Serial.println(colonIndex);
             if (colonIndex != -1)
             {
                 known_ssids[known_len] = line.substring(0, colonIndex);
                 known_passs[known_len] = line.substring(colonIndex + 1);
-                Serial.println(known_ssids[known_len]);
-                Serial.println(known_passs[known_len]);
+                // Serial.println(known_ssids[known_len]);
+                // Serial.println(known_passs[known_len]);
                 known_len++;
             }
         }
@@ -179,14 +179,14 @@ String load_Options()
         return "";
     }
     String optionList = "";
-    Serial.println("optionList: ");
+    // Serial.println("optionList: ");
 
     while (file.available())
     {
         String option = file.readStringUntil('\n');
 
-        Serial.println("opt: ");
-        Serial.println(option);
+        // Serial.println("opt: ");
+        // Serial.println(option);
 
         option.trim();
         if (!option.isEmpty())
@@ -226,7 +226,7 @@ void setup_Spiffs()
         Serial.println("Mounted SPIFFS");
     }
 
-    list_Dir(SPIFFS, "/", 0);
+    // list_Dir(SPIFFS, "/", 0);
 
     Serial.println("reading ssids");
 
@@ -234,5 +234,5 @@ void setup_Spiffs()
     read_SsidPasswords();
 
     // Load options and inject into HTML
-    load_Options();
+    // load_Options();
 }

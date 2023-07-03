@@ -263,8 +263,8 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 // const char *mqttPassword = "asdf1298";
 
 //---- WiFi settings
-String ssid = "";
-String password = "";
+String ssid = "Misafir 2.4";
+String password = "Filtrekahve24";
 
 int selected_ssid = 0;
 
@@ -631,6 +631,11 @@ void updateModeState()
   }
 }
 
+TaskHandle_t hndl_PushAll;
+TaskHandle_t hndl_UpdateLedC;
+TaskHandle_t hndl_DustSens;
+TaskHandle_t hndl_Dht11Sens;
+
 void Task_PushAll(void *parameter)
 {
   (void)parameter;
@@ -664,6 +669,21 @@ void Task_PushAll(void *parameter)
 
     // Update mode state to calculate fan speed and humidifier intensity
     updateModeState();
+
+    // Control the fan and humidifier based on the variables
+    // ledcWrite(FAN_CHANNEL, fanSpeed);
+    // ledcWrite(HUMIDIFIER_CHANNEL, humidifierIntensity);
+
+    vTaskDelay(pdMS_TO_TICKS(dly_loop));
+  }
+}
+
+void Task_UpdateLedC(void *parameter)
+{
+  (void)parameter;
+
+  for (;;)
+  {
 
     // Control the fan and humidifier based on the variables
     ledcWrite(FAN_CHANNEL, fanSpeed);
@@ -722,6 +742,26 @@ void Task_Dht11Sensor(void *parameter)
 
 #pragma region Arduino
 
+void check_stackUsage()
+{
+  UBaseType_t stackUsage = uxTaskGetStackHighWaterMark(hndl_PushAll);
+  Serial.print("hndl_PushAll usage: ");
+  Serial.print(stackUsage);
+  Serial.println(" words");
+  stackUsage = uxTaskGetStackHighWaterMark(hndl_UpdateLedC);
+  Serial.print("hndl_UpdateLedC usage: ");
+  Serial.print(stackUsage);
+  Serial.println(" words");
+  stackUsage = uxTaskGetStackHighWaterMark(hndl_Dht11Sens);
+  Serial.print("hndl_Dht11Sens usage: ");
+  Serial.print(stackUsage);
+  Serial.println(" words");
+  stackUsage = uxTaskGetStackHighWaterMark(hndl_DustSens);
+  Serial.print("hndl_DustSens usage: ");
+  Serial.print(stackUsage);
+  Serial.println(" words");
+}
+
 void setup()
 {
   setup_Serial();
@@ -748,16 +788,32 @@ void setup()
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(mqttCallback);
 
-  xTaskCreate(Task_DustSensor, "Task_dustSensor", 4096, NULL, 10, NULL);
-  xTaskCreate(Task_Dht11Sensor, "Task_dht11Sensor", 4096, NULL, 15, NULL);
-  xTaskCreate(Task_PushAll, "Task_PushAll", 4096, NULL, 20, NULL);
+  xTaskCreate(Task_DustSensor, "Task_dustSensor", 4096, NULL, 10, &hndl_DustSens);
+  xTaskCreate(Task_Dht11Sensor, "Task_dht11Sensor", 4096, NULL, 15, &hndl_Dht11Sens);
+  xTaskCreate(Task_PushAll, "Task_PushAll", 4096, NULL, 20, &hndl_PushAll);
+  // xTaskCreate(Task_UpdateLedC, "Task_UpdateLedC", 4096, NULL, 20, &hndl_UpdateLedC);
+
+  check_stackUsage();
 
   Serial.println("Setup Done!");
   delay(3000);
 }
 
+unsigned long tim_last;
+
 void loop()
 {
+  unsigned long now = millis();
+  if (now - tim_last >= dly_loop)
+  {
+
+    // check_stackUsage();
+
+    // ledcWrite(FAN_CHANNEL, fanSpeed);
+    // ledcWrite(HUMIDIFIER_CHANNEL, humidifierIntensity);
+
+    tim_last = now;
+  }
 }
 
 #pragma endregion
