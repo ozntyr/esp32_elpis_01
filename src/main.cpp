@@ -519,7 +519,7 @@ void control_AirPurifier();
 // Real-time feedback and alerts
 void update_AQI()
 {
-  calculate_AQI(10);
+  calculate_AQI(sens_dust_pm25);
 }
 void check_AirQuality_Threshold()
 {
@@ -663,8 +663,9 @@ void Task_PushAll(void *parameter)
     }
     else
     {
-      Serial.printf("sen3: %f \n", sens_dust_pm25);
-      publish_Message(tr_dust_pm25, String(sens_dust_pm25), true);
+      check_AirQuality_Threshold();
+      Serial.printf("sen3: %f \n", AQI_PM25);
+      publish_Message(tr_dust_pm25, String(AQI_PM25), true);
     }
 
     // Update mode state to calculate fan speed and humidifier intensity
@@ -681,6 +682,8 @@ void Task_PushAll(void *parameter)
 void Task_UpdateLedC(void *parameter)
 {
   (void)parameter;
+
+  setup_ledc();
 
   for (;;)
   {
@@ -791,7 +794,7 @@ void setup()
   xTaskCreate(Task_DustSensor, "Task_dustSensor", 4096, NULL, 10, &hndl_DustSens);
   xTaskCreate(Task_Dht11Sensor, "Task_dht11Sensor", 4096, NULL, 15, &hndl_Dht11Sens);
   xTaskCreate(Task_PushAll, "Task_PushAll", 4096, NULL, 20, &hndl_PushAll);
-  // xTaskCreate(Task_UpdateLedC, "Task_UpdateLedC", 4096, NULL, 20, &hndl_UpdateLedC);
+  xTaskCreate(Task_UpdateLedC, "Task_UpdateLedC", 4096, NULL, 20, &hndl_UpdateLedC);
 
   check_stackUsage();
 
@@ -808,9 +811,6 @@ void loop()
   {
 
     // check_stackUsage();
-
-    // ledcWrite(FAN_CHANNEL, fanSpeed);
-    // ledcWrite(HUMIDIFIER_CHANNEL, humidifierIntensity);
 
     tim_last = now;
   }
