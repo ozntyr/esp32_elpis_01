@@ -4,6 +4,8 @@
 #include <DHT.h>
 #include <GP2YDustSensor.h>
 #include <driver/ledc.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
 
 #include "sw_fs.h"
 
@@ -64,6 +66,17 @@ enum sw_modes
 };
 
 sw_modes mode_current;
+
+const char *ntpServer = "pool.ntp.org";
+const long gmtOffset = 10800;
+const int daylightOffset = 0;
+
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, ntpServer, gmtOffset, daylightOffset);
+
+struct tm currentDate;
+struct tm startDate;
+struct tm stopDate;
 
 #pragma endregion
 
@@ -561,6 +574,43 @@ void analyze_AirQuality_Trends()
 
 #pragma endregion
 
+#pragma region NTP
+
+void printDateTime(const struct tm &timeStruct)
+{
+  Serial.print("Date: ");
+  Serial.print(timeStruct.tm_year + 1900);
+  Serial.print("-");
+  Serial.print(timeStruct.tm_mon + 1);
+  Serial.print("-");
+  Serial.print(timeStruct.tm_mday);
+  Serial.print(" ");
+  Serial.print(timeStruct.tm_hour);
+  Serial.print(":");
+  Serial.print(timeStruct.tm_min);
+  Serial.print(":");
+  Serial.println(timeStruct.tm_sec);
+}
+
+void getTimeFromNTP(struct tm &timeStruct)
+{
+  time_t currentTimestamp = timeClient.getEpochTime();
+  localtime_r(&currentTimestamp, &timeStruct);
+}
+
+void setTimeSpan5Min()
+{
+  time_t currentTime = timeClient.getEpochTime(); // Obtain current time as time_t
+  int startTime = static_cast<int>(currentTime);  // Convert time_t to integer
+  int stopTime = startTime + 300;                 // Add 5 mins (300 seconds)
+  time_t endTime = static_cast<time_t>(stopTime); // Convert back to time_t
+
+  localtime_r(&currentTime, &startDate);
+  localtime_r(&endTime, &stopDate);
+}
+
+#pragma endregion
+
 #pragma region Tasks
 
 void updateModeState()
@@ -656,6 +706,7 @@ TaskHandle_t hndl_PushAll;
 TaskHandle_t hndl_UpdateLedC;
 TaskHandle_t hndl_DustSens;
 TaskHandle_t hndl_Dht11Sens;
+TaskHandle_t hndl_NTP;
 
 void Task_PushAll(void *parameter)
 {
@@ -759,6 +810,52 @@ void Task_Dht11Sensor(void *parameter)
     sens_humidity = dht.readHumidity();       // replace the random value  with your sensor value
 
     vTaskDelay(pdMS_TO_TICKS(dly_dht));
+  }
+}
+
+void Task_NTP(void *parameter)
+{
+  (void)parameter;
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.println("NTP requires wifi connection!");
+    vTaskDelay(pdMS_TO_TICKS(dly_loop));
+  }
+
+  timeClient.begin();
+
+  Serial.println("Connected to NTP");
+
+  timeClient.update();
+
+#pragma region testing
+
+  Serial.print("Start ");
+  getTimeFromNTP(startDate);
+  printDateTime(startDate);
+
+  stopDate = startDate;
+  stopDate.tm_min += 5;
+
+  mktime(&stopDate);
+
+  setTimeSpan5Min();
+
+  Serial.print("Stop ");
+  printDateTime(stopDate);
+
+#pragma endregion
+
+  for (;;)
+  {
+
+    timeClient.update();
+
+    Serial.print("Current ");
+    getTimeFromNTP(currentDate);
+    printDateTime(currentDate);
+
+    vTaskDelay(pdMS_TO_TICKS(dly_loop));
   }
 }
 
