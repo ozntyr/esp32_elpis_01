@@ -55,6 +55,7 @@ const char *tc_start_humidifier = "Commands/StartHumidifier";
 const char *tc_set_mode = "Commands/SetMode";
 const char *tc_set_timer_date = "Commands/SetTimerDate";
 const char *tc_set_timer_duration = "Commands/SetTimerDuration";
+const char *tc_set_is_timer_repeating = "Commands/SetIsTimerRepeating";
 
 enum sw_modes
 {
@@ -74,9 +75,12 @@ const int daylightOffset = 0;
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, ntpServer, gmtOffset, daylightOffset);
 
-struct tm currentDate;
-struct tm startDate;
-struct tm stopDate;
+struct tm timer_currentDate_tm;
+struct tm timer_startDate_tm;
+struct tm timer_stopDate_tm;
+int timer_durationinSeconds_int = 0;
+
+bool is_timerRepeating = false;
 
 #pragma endregion
 
@@ -134,6 +138,65 @@ void startHumidifier(int intensity)
 void stopHumidifier()
 {
   humidifierIntensity = 0; // Set humidifier intensity to 0 (off)
+}
+
+#pragma endregion
+
+#pragma region NTP
+
+void printDateTime(const struct tm &timeStruct)
+{
+  Serial.print("Date: ");
+  Serial.print(timeStruct.tm_year + 1900);
+  Serial.print("-");
+  Serial.print(timeStruct.tm_mon + 1);
+  Serial.print("-");
+  Serial.print(timeStruct.tm_mday);
+  Serial.print(" ");
+  Serial.print(timeStruct.tm_hour);
+  Serial.print(":");
+  Serial.print(timeStruct.tm_min);
+  Serial.print(":");
+  Serial.println(timeStruct.tm_sec);
+}
+
+void getTimeFromNTP(struct tm &timeStruct)
+{
+  time_t currentTimestamp = timeClient.getEpochTime();
+  localtime_r(&currentTimestamp, &timeStruct);
+}
+
+void updateTimerStopDate()
+{
+  /* this part is just for practice
+  int startTime = static_cast<int>(mktime(&timer_startDate_tm)); // Convert tm to time_t then time_t to integer
+  int stopTime = startTime + timer_durationinSeconds_int;        // Add 5 mins (300 seconds)
+  time_t endTime = static_cast<time_t>(stopTime);                // Convert back to time_t
+
+  localtime_r(&endTime, &timer_stopDate_tm);
+  */
+
+  timer_stopDate_tm = timer_startDate_tm;
+  timer_stopDate_tm.tm_sec += timer_durationinSeconds_int;
+}
+
+void setTimerStartDate(int seconds)
+{
+  time_t startTime = static_cast<time_t>(seconds);
+  localtime_r(&startTime, &timer_startDate_tm);
+
+  updateTimerStopDate();
+}
+
+void setTimerDuration(int seconds)
+{
+  timer_durationinSeconds_int = seconds;
+  updateTimerStopDate();
+}
+
+void setTimerRepeat(bool isit)
+{
+  is_timerRepeating = isit;
 }
 
 #pragma endregion
@@ -206,11 +269,16 @@ void processMessages(char *topic, byte *payload, unsigned int length)
   }
   else if (strcmp(topic, tc_set_timer_date) == 0)
   {
-    // TODO we need to add rtc
+    setTimerStartDate(std::stoi(incommingMessage.c_str()));
   }
   else if (strcmp(topic, tc_set_timer_duration) == 0)
   {
-    // TODO we need to add rtc
+    setTimerDuration(std::stoi(incommingMessage.c_str()));
+  }
+  else if (strcmp(topic, tc_set_is_timer_repeating) == 0)
+  {
+    String str = incommingMessage.c_str();
+    is_timerRepeating = (str == "true" || str == "True" || str == "TRUE" || str == "1");
   }
   else
   {
@@ -574,43 +642,6 @@ void analyze_AirQuality_Trends()
 
 #pragma endregion
 
-#pragma region NTP
-
-void printDateTime(const struct tm &timeStruct)
-{
-  Serial.print("Date: ");
-  Serial.print(timeStruct.tm_year + 1900);
-  Serial.print("-");
-  Serial.print(timeStruct.tm_mon + 1);
-  Serial.print("-");
-  Serial.print(timeStruct.tm_mday);
-  Serial.print(" ");
-  Serial.print(timeStruct.tm_hour);
-  Serial.print(":");
-  Serial.print(timeStruct.tm_min);
-  Serial.print(":");
-  Serial.println(timeStruct.tm_sec);
-}
-
-void getTimeFromNTP(struct tm &timeStruct)
-{
-  time_t currentTimestamp = timeClient.getEpochTime();
-  localtime_r(&currentTimestamp, &timeStruct);
-}
-
-void setTimeSpan5Min()
-{
-  time_t currentTime = timeClient.getEpochTime(); // Obtain current time as time_t
-  int startTime = static_cast<int>(currentTime);  // Convert time_t to integer
-  int stopTime = startTime + 300;                 // Add 5 mins (300 seconds)
-  time_t endTime = static_cast<time_t>(stopTime); // Convert back to time_t
-
-  localtime_r(&currentTime, &startDate);
-  localtime_r(&endTime, &stopDate);
-}
-
-#pragma endregion
-
 #pragma region Tasks
 
 void updateModeState()
@@ -828,32 +859,16 @@ void Task_NTP(void *parameter)
 
   timeClient.update();
 
-#pragma region testing
-
-  Serial.print("Start ");
-  getTimeFromNTP(startDate);
-  printDateTime(startDate);
-
-  stopDate = startDate;
-  stopDate.tm_min += 5;
-
-  mktime(&stopDate);
-
-  setTimeSpan5Min();
-
-  Serial.print("Stop ");
-  printDateTime(stopDate);
-
-#pragma endregion
-
   for (;;)
   {
 
     timeClient.update();
 
     Serial.print("Current ");
-    getTimeFromNTP(currentDate);
-    printDateTime(currentDate);
+    getTimeFromNTP(timer_currentDate_tm);
+    printDateTime(timer_currentDate_tm);
+
+    // TODO
 
     vTaskDelay(pdMS_TO_TICKS(dly_loop));
   }
@@ -913,6 +928,7 @@ void setup()
   xTaskCreate(Task_Dht11Sensor, "Task_dht11Sensor", 4096, NULL, 15, &hndl_Dht11Sens);
   xTaskCreate(Task_PushAll, "Task_PushAll", 4096, NULL, 20, &hndl_PushAll);
   xTaskCreate(Task_UpdateLedC, "Task_UpdateLedC", 4096, NULL, 20, &hndl_UpdateLedC);
+  xTaskCreate(Task_NTP, "Task_NTP", 4096, NULL, 20, &hndl_NTP);
 
   check_stackUsage();
 
