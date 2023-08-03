@@ -81,6 +81,8 @@ struct tm timer_stopDate_tm;
 int timer_durationinSeconds_int = 0;
 
 bool is_timerRepeating = false;
+bool is_waiting4Schedule = false;
+bool is_onSchedule = false;
 
 #pragma endregion
 
@@ -180,10 +182,15 @@ void updateTimerStopDate()
   timer_stopDate_tm.tm_sec += timer_durationinSeconds_int;
 }
 
-void setTimerStartDate(int seconds)
+void setTimerStartDate(int seconds, bool isrepeat)
 {
   time_t startTime = static_cast<time_t>(seconds);
   localtime_r(&startTime, &timer_startDate_tm);
+
+  if (isrepeat)
+    timer_startDate_tm.tm_hour += 24;
+
+  is_waiting4Schedule = true;
 
   updateTimerStopDate();
 }
@@ -197,6 +204,7 @@ void setTimerDuration(int seconds)
 void setTimerRepeat(bool isit)
 {
   is_timerRepeating = isit;
+  is_waiting4Schedule = true;
 }
 
 #pragma endregion
@@ -269,7 +277,7 @@ void processMessages(char *topic, byte *payload, unsigned int length)
   }
   else if (strcmp(topic, tc_set_timer_date) == 0)
   {
-    setTimerStartDate(std::stoi(incommingMessage.c_str()));
+    setTimerStartDate(std::stoi(incommingMessage.c_str()), false);
   }
   else if (strcmp(topic, tc_set_timer_duration) == 0)
   {
@@ -277,8 +285,7 @@ void processMessages(char *topic, byte *payload, unsigned int length)
   }
   else if (strcmp(topic, tc_set_is_timer_repeating) == 0)
   {
-    String str = incommingMessage.c_str();
-    is_timerRepeating = (str == "true" || str == "True" || str == "TRUE" || str == "1");
+    setTimerRepeat((incommingMessage == "true" || incommingMessage == "True" || incommingMessage == "TRUE" || incommingMessage == "1"));
   }
   else
   {
@@ -868,7 +875,24 @@ void Task_NTP(void *parameter)
     getTimeFromNTP(timer_currentDate_tm);
     printDateTime(timer_currentDate_tm);
 
-    // TODO
+    if (mode_current == sw_modes::MODE_MANUAL)
+    {
+      if (is_waiting4Schedule && mktime(&timer_currentDate_tm) >= mktime(&timer_startDate_tm))
+      {
+        startFan(fanSpeedManual);
+        startHumidifier(humidifierIntensityManual);
+        is_onSchedule = true;
+        is_waiting4Schedule = false;
+      }
+    }
+    if (is_onSchedule && mktime(&timer_currentDate_tm) >= mktime(&timer_stopDate_tm))
+    {
+      stopFan();
+      stopHumidifier();
+      is_onSchedule = false;
+      if (is_timerRepeating)
+        setTimerStartDate(static_cast<int>(mktime(&timer_startDate_tm)), true);
+        }
 
     vTaskDelay(pdMS_TO_TICKS(dly_loop));
   }
