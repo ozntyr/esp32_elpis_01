@@ -6,12 +6,12 @@
 #include <driver/ledc.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
+#include <FastLED.h>
 
 #include "sw_fs.h"
 
 #pragma region Variable and Constant Definitions
 
-int pin_led = 2;
 int pin_dht11 = 23;
 
 #define DHTPIN pin_dht11
@@ -56,6 +56,8 @@ const char *tc_set_mode = "Commands/SetMode";
 const char *tc_set_timer_date = "Commands/SetTimerDate";
 const char *tc_set_timer_duration = "Commands/SetTimerDuration";
 const char *tc_set_is_timer_repeating = "Commands/SetIsTimerRepeating";
+const char *tc_set_ledEffect = "Commands/SetLedEffect";
+const char *tc_set_ledColor = "Commands/SetLedColor";
 
 enum sw_modes
 {
@@ -83,6 +85,30 @@ int timer_durationinSeconds_int = 0;
 bool is_timerRepeating = false;
 bool is_waiting4Schedule = false;
 bool is_onSchedule = false;
+
+const int BUFFER_SIZE = 50;
+char buffer[BUFFER_SIZE];
+int bufferIndex = 0;
+int counter = 0;
+
+#define LED_PIN 2    // TBD
+#define LED_COUNT 30 // TBD
+
+CRGB leds[LED_COUNT];
+
+enum led_effects
+{
+  EFF_OFF = 0,
+  EFF_SOLID,
+  EFF_WIPE,
+  EFF_CHASE,
+  EFF_BREATHING,
+  EFF_FIRE,
+  EFF_RAINBOW
+};
+
+led_effects ledEff_current = led_effects::EFF_OFF;
+CRGB ledColor_current = CRGB::Black;
 
 #pragma endregion
 
@@ -140,6 +166,107 @@ void startHumidifier(int intensity)
 void stopHumidifier()
 {
   humidifierIntensity = 0; // Set humidifier intensity to 0 (off)
+}
+
+#pragma endregion
+
+#pragma region WS2812 led
+
+void setup_ws2812()
+{
+  FastLED.addLeds<NEOPIXEL, LED_PIN>(leds, LED_COUNT);
+  FastLED.show(); // Initialize all pixels to off
+}
+
+bool isValidHtmlColor(const char *htmlCode)
+{
+  if (htmlCode[0] == '#' && strlen(htmlCode) == 7)
+  {
+    for (int i = 1; i < 7; i++)
+    {
+      char c = htmlCode[i];
+      if (!isxdigit(c))
+      {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+CRGB htmlToColor(const char *htmlCode)
+{
+  long number = strtol(htmlCode + 1, NULL, 16);
+  uint8_t r = number >> 16;
+  uint8_t g = number >> 8;
+  uint8_t b = number;
+  return CRGB(r, g, b);
+}
+
+void led_turnOff()
+{
+  fill_solid(leds, LED_COUNT, CRGB::Black);
+  FastLED.show();
+}
+
+void led_solidColor(CRGB color)
+{
+  fill_solid(leds, LED_COUNT, color);
+  FastLED.show();
+}
+
+void led_colorWipe(CRGB color, int delayTime)
+{
+  for (int i = 0; i < LED_COUNT; i++)
+  {
+    leds[i] = color;
+    FastLED.show();
+    delay(delayTime);
+  }
+}
+
+void led_colorChase(CRGB color, int delayTime)
+{
+  for (int i = 0; i < LED_COUNT; i++)
+  {
+    leds[i] = color;
+    FastLED.show();
+    delay(delayTime);
+    leds[i] = CRGB::Black;
+  }
+}
+
+void led_breathingEffect(CRGB color)
+{
+  int brightness;
+  for (int i = 0; i < 256; i++)
+  {
+    brightness = sin8(i);
+    fill_solid(leds, LED_COUNT, color);
+    FastLED.setBrightness(brightness);
+    FastLED.show();
+    delay(20);
+  }
+}
+
+void led_fireEffect()
+{
+  // Implement the fire effect here
+  // (You can use the Fire2012 example from the FastLED library, for example)
+}
+
+void led_rainbowEffect()
+{
+  uint8_t deltaHue = 255 / LED_COUNT;
+  uint8_t hue = 0;
+  for (int i = 0; i < LED_COUNT; i++)
+  {
+    leds[i] = CHSV(hue, 255, 255);
+    hue += deltaHue;
+  }
+  FastLED.show();
+  delay(10);
 }
 
 #pragma endregion
@@ -287,9 +414,77 @@ void processMessages(char *topic, byte *payload, unsigned int length)
   {
     setTimerRepeat((incommingMessage == "true" || incommingMessage == "True" || incommingMessage == "TRUE" || incommingMessage == "1"));
   }
+  else if (strcmp(topic, tc_set_ledEffect) == 0)
+  {
+    led_effects eff = static_cast<led_effects>(std::stoi(incommingMessage.c_str()));
+
+    if (eff >= led_effects::EFF_OFF && eff <= led_effects::EFF_RAINBOW && ledEff_current != eff)
+    {
+      ledEff_current = eff;
+    }
+  }
+  else if (strcmp(topic, tc_set_ledColor) == 0)
+  {
+    if (isValidHtmlColor(incommingMessage.c_str()))
+      ledColor_current = htmlToColor(incommingMessage.c_str());
+  }
   else
   {
     // TODO?
+  }
+}
+
+void processStreamBuffer(const char *buffer)
+{
+  // Process the received message from the buffer
+  // For example, you can extract topic and payload like before
+  String message = buffer;
+  int idx_separator = message.indexOf('=');
+  if (message.startsWith("$") && idx_separator != -1)
+  {
+    String topic = message.substring(1, idx_separator);
+    String payload = message.substring(idx_separator + 1);
+
+    // Convert the topic and payload to char arrays
+    char topicArray[50];   // Adjust the size based on your requirements
+    char payloadArray[50]; // Adjust the size based on your requirements
+    topic.toCharArray(topicArray, sizeof(topicArray));
+    payload.toCharArray(payloadArray, sizeof(payloadArray));
+
+    // Call the processMessages function with the extracted data
+    processMessages(topicArray, (byte *)payloadArray, payload.length());
+  }
+}
+
+void loop_Serial()
+{
+  // Check for incoming data on Serial port
+  if (Serial.available() > 0)
+  {
+    // Read the data from Serial
+    String serialData = Serial.readString();
+
+    int idx_separator = serialData.indexOf('=');
+
+    // Check if the message format is correct
+    if (serialData.startsWith("$") && idx_separator != -1)
+    {
+      // Remove any spaces from the message
+      serialData.replace(" ", "");
+
+      // Extract the topic and payload from the message
+      String topic = serialData.substring(1, idx_separator);
+      String payload = serialData.substring(idx_separator + 1);
+
+      // Convert the topic and payload to char arrays
+      char topicArray[50];   // Adjust the size based on your requirements
+      char payloadArray[50]; // Adjust the size based on your requirements
+      topic.toCharArray(topicArray, sizeof(topicArray));
+      payload.toCharArray(payloadArray, sizeof(payloadArray));
+
+      // Call the processMessages function with the extracted data
+      processMessages(topicArray, (byte *)payloadArray, payload.length());
+    }
   }
 }
 
@@ -745,6 +940,8 @@ TaskHandle_t hndl_UpdateLedC;
 TaskHandle_t hndl_DustSens;
 TaskHandle_t hndl_Dht11Sens;
 TaskHandle_t hndl_NTP;
+TaskHandle_t hndl_StreamRead;
+TaskHandle_t hndl_WS2812;
 
 void Task_PushAll(void *parameter)
 {
@@ -892,9 +1089,85 @@ void Task_NTP(void *parameter)
       is_onSchedule = false;
       if (is_timerRepeating)
         setTimerStartDate(static_cast<int>(mktime(&timer_startDate_tm)), true);
-        }
+    }
 
     vTaskDelay(pdMS_TO_TICKS(dly_loop));
+  }
+}
+
+void Task_ReadSerialStream(void *parameter)
+{
+  while (true)
+  {
+    if (Serial.available() > 0)
+    {
+      char character = Serial.read();
+      if (character != '\n')
+      {
+        // Add character to buffer if it's not a newline
+        if (bufferIndex < BUFFER_SIZE - 1)
+        {
+          buffer[bufferIndex] = character;
+          bufferIndex++;
+        }
+      }
+      else
+      {
+        // Process the buffer if a newline character is received
+        buffer[bufferIndex] = '\0'; // Null-terminate the buffer for string manipulation
+        processStreamBuffer(buffer);
+        bufferIndex = 0; // Reset the buffer index for the next message
+      }
+      counter = 0; // Reset the counter as there is data available
+    }
+    else
+    {
+      counter++;
+      if (counter > 5)
+      {
+        counter = 0;
+        bufferIndex = 0; // Clear the buffer as no data is available for a certain period
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(100)); // Adjust the delay time as needed
+  }
+}
+
+void Task_WS2812(void *parameter)
+{
+
+  setup_ws2812();
+
+  for (;;)
+  {
+
+    switch (ledEff_current)
+    {
+    case EFF_SOLID:
+      led_solidColor(ledColor_current);
+      break;
+    case EFF_WIPE:
+      led_colorWipe(ledColor_current, 50);
+      break;
+    case EFF_CHASE:
+      led_colorChase(ledColor_current, 50);
+      break;
+    case EFF_BREATHING:
+      led_breathingEffect(ledColor_current);
+      break;
+    case EFF_FIRE:
+      led_fireEffect();
+      break;
+    case EFF_RAINBOW:
+      led_rainbowEffect();
+      break;
+    case EFF_OFF:
+    default:
+      led_turnOff();
+      break;
+    }
+
+    vTaskDelay(dly_loop);
   }
 }
 
@@ -936,9 +1209,6 @@ void setup()
   Serial.println("setup_webserver");
   setup_WebServer();
 
-  pinMode(pin_led, OUTPUT); // Initialize the BUILTIN_LED pin as an output
-                            // pinMode(pin_dht11, INPUT); // Initialize the BUILTIN_LED pin as an output
-
 #ifdef ESP8266
   espClient.setInsecure();
 #else // for the ESP32
@@ -953,6 +1223,8 @@ void setup()
   xTaskCreate(Task_PushAll, "Task_PushAll", 4096, NULL, 20, &hndl_PushAll);
   xTaskCreate(Task_UpdateLedC, "Task_UpdateLedC", 4096, NULL, 20, &hndl_UpdateLedC);
   xTaskCreate(Task_NTP, "Task_NTP", 4096, NULL, 20, &hndl_NTP);
+  xTaskCreate(Task_ReadSerialStream, "Task_ReadSerialStream", 4096, NULL, 20, &hndl_StreamRead);
+  xTaskCreate(Task_WS2812, "Task_WS2812", 4096, NULL, 100, &hndl_WS2812);
 
   check_stackUsage();
 
