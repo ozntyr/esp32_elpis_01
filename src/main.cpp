@@ -12,7 +12,12 @@
 
 #pragma region Variable and Constant Definitions
 
-int pin_dht11 = 23;
+#define pin_dht11 23
+#define pin_dust_led 32
+#define pin_dust_v0 36
+#define pin_ws2812 26
+#define pin_fan 12
+#define pin_mist 14
 
 #define DHTPIN pin_dht11
 #define DHTTYPE DHT11
@@ -33,8 +38,8 @@ float sens_CO2;
 
 int command1 = 0;
 
-const uint8_t SHARP_LED_PIN = 32; // Sharp Dust/particle sensor Led Pin
-const uint8_t SHARP_VO_PIN = 36;  // Sharp Dust/particle analog out pin used for reading
+#define SHARP_LED_PIN pin_dust_led // Sharp Dust/particle sensor Led Pin
+#define SHARP_VO_PIN pin_dust_v0   // Sharp Dust/particle analog out pin used for reading
 
 GP2YDustSensor dustSensor(GP2YDustSensorType::GP2Y1010AU0F, SHARP_LED_PIN, SHARP_VO_PIN);
 
@@ -91,8 +96,8 @@ char buffer[BUFFER_SIZE];
 int bufferIndex = 0;
 int counter = 0;
 
-#define LED_PIN 2    // TBD
-#define LED_COUNT 30 // TBD
+#define LED_PIN pin_ws2812 // TBD
+#define LED_COUNT 30       // TBD
 
 CRGB leds[LED_COUNT];
 
@@ -116,9 +121,9 @@ CRGB ledColor_current = CRGB::Black;
 
 // Constants for fan and humidifier channels and GPIO pins
 const int FAN_CHANNEL = 0;
-const int FAN_PIN = 12;
+#define FAN_PIN pin_fan
 const int HUMIDIFIER_CHANNEL = 1;
-const int HUMIDIFIER_PIN = 14;
+#define HUMIDIFIER_PIN pin_mist
 
 // Variables for fan and humidifier control
 int fanSpeed = 0;            // Range: 0-255
@@ -170,7 +175,7 @@ void stopHumidifier()
 
 #pragma endregion
 
-#pragma region WS2812 led
+#pragma region WS2812
 
 void setup_ws2812()
 {
