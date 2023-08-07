@@ -12,6 +12,8 @@
 
 // TODO add bmp180
 
+// todo add brightness option
+
 #pragma region Variable and Constant Definitions
 
 #define pin_dht11 23
