@@ -10,6 +10,8 @@
 
 #include "sw_fs.h"
 
+// TODO add bmp180
+
 #pragma region Variable and Constant Definitions
 
 #define pin_dht11 23
