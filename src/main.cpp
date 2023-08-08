@@ -12,8 +12,6 @@
 
 // TODO add bmp180
 
-// todo add brightness option
-
 #pragma region Variable and Constant Definitions
 
 #define pin_dht11 23
@@ -67,6 +65,7 @@ const char *tc_set_timer_duration = "Commands/SetTimerDuration";
 const char *tc_set_is_timer_repeating = "Commands/SetIsTimerRepeating";
 const char *tc_set_ledEffect = "Commands/SetLedEffect";
 const char *tc_set_ledColor = "Commands/SetLedColor";
+const char *tc_set_ledBrightness = "Commands/SetLedBrightness";
 
 enum sw_modes
 {
@@ -118,6 +117,8 @@ enum led_effects
 
 led_effects ledEff_current = led_effects::EFF_OFF;
 CRGB ledColor_current = CRGB::Black;
+
+uint8_t ledBrightnes_current = 128; // Initial brightness value (0-255)
 
 #pragma endregion
 
@@ -211,6 +212,17 @@ CRGB htmlToColor(const char *htmlCode)
   uint8_t g = number >> 8;
   uint8_t b = number;
   return CRGB(r, g, b);
+}
+
+void led_changeBrightness(uint8_t newBrightness)
+{
+  // Ensure the new brightness is within valid range
+  if (newBrightness >= 0 && newBrightness <= 255)
+  {
+    ledBrightnes_current = newBrightness;
+    FastLED.setBrightness(ledBrightnes_current);
+    FastLED.show();
+  }
 }
 
 void led_turnOff()
@@ -436,6 +448,11 @@ void processMessages(char *topic, byte *payload, unsigned int length)
   {
     if (isValidHtmlColor(incommingMessage.c_str()))
       ledColor_current = htmlToColor(incommingMessage.c_str());
+  }
+  else if (strcmp(topic, tc_set_ledBrightness) == 0)
+  {
+    int brightness = std::stoi(incommingMessage.c_str());
+    led_changeBrightness(brightness);
   }
   else
   {
