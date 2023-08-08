@@ -7,10 +7,11 @@
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <FastLED.h>
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BMP280.h>
 
 #include "sw_fs.h"
-
-// TODO add bmp180
 
 #pragma region Variable and Constant Definitions
 
@@ -119,6 +120,12 @@ led_effects ledEff_current = led_effects::EFF_OFF;
 CRGB ledColor_current = CRGB::Black;
 
 uint8_t ledBrightnes_current = 128; // Initial brightness value (0-255)
+
+#define BMP280_1_I2C_ADDRESS 0x76 // Change to the address of the first BMP280
+#define BMP280_2_I2C_ADDRESS 0x77 // Change to the address of the second BMP280
+
+Adafruit_BMP280 bmpSensor1; // Initialize the first BMP280 sensor object
+Adafruit_BMP280 bmpSensor2; // Initialize the second BMP280 sensor object
 
 #pragma endregion
 
@@ -968,6 +975,7 @@ TaskHandle_t hndl_Dht11Sens;
 TaskHandle_t hndl_NTP;
 TaskHandle_t hndl_StreamRead;
 TaskHandle_t hndl_WS2812;
+TaskHandle_t hndl_BMP280;
 
 void Task_PushAll(void *parameter)
 {
@@ -1197,6 +1205,62 @@ void Task_WS2812(void *parameter)
   }
 }
 
+void Task_BMP280(void *parameter)
+{
+
+  bool is_bmp1OK = false;
+  bool is_bmp2OK = false;
+
+  // Initialize sensor 1
+  if (bmpSensor1.begin(BMP280_1_I2C_ADDRESS))
+  {
+    is_bmp1OK = true;
+    Serial.println("BMP280 Sensor 1 initialized successfully!");
+  }
+
+  // Initialize sensor 2
+  if (bmpSensor2.begin(BMP280_2_I2C_ADDRESS))
+  {
+    is_bmp2OK = true;
+    Serial.println("BMP280 Sensor 2 initialized successfully!");
+  }
+
+  while (true)
+  {
+    if (!is_bmp1OK)
+    {
+      Serial.println("Sensor data retrieval error:");
+      Serial.println("Could not find a valid BMP280 sensor at address 0x76, check wiring!");
+    }
+    else
+    {
+      float bmp1_altitude = bmpSensor1.readAltitude();
+      float bmp1_pressure = bmpSensor1.readPressure() / 100000.0; // Convert Pa to bars
+      float bmp1_temperature = bmpSensor1.readTemperature();
+
+      Serial.printf("1st bmp280: Altitude: %.2f meters, Pressure: %.5f bars, Temperature: %.2f °C\n",
+                    bmp1_altitude, bmp1_pressure, bmp1_temperature);
+    }
+
+    if (!is_bmp2OK)
+    {
+      Serial.println("Sensor data retrieval error:");
+      Serial.println("Could not find a valid BMP280 sensor at address 0x77, check wiring!");
+    }
+    else
+    {
+      float bmp2_altitude = bmpSensor2.readAltitude();
+      float bmp2_pressure = bmpSensor2.readPressure() / 100000.0; // Convert Pa to bars
+      float bmp2_temperature = bmpSensor2.readTemperature();
+
+      Serial.printf("2nd bmp280: Altitude: %.2f meters, Pressure: %.5f bars, Temperature: %.2f °C\n",
+                    bmp2_altitude, bmp2_pressure, bmp2_temperature);
+    }
+
+    vTaskDelay(dly_loop); // Delay for 1000 ms
+  }
+}
+
 #pragma endregion
 
 #pragma region Arduino
@@ -1251,6 +1315,7 @@ void setup()
   xTaskCreate(Task_NTP, "Task_NTP", 4096, NULL, 20, &hndl_NTP);
   xTaskCreate(Task_ReadSerialStream, "Task_ReadSerialStream", 4096, NULL, 20, &hndl_StreamRead);
   xTaskCreate(Task_WS2812, "Task_WS2812", 4096, NULL, 100, &hndl_WS2812);
+  xTaskCreate(Task_BMP280, "Task_BMP280", 4096, NULL, 20, &hndl_BMP280);
 
   check_stackUsage();
 
