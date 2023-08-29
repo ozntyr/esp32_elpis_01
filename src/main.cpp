@@ -1,7 +1,6 @@
 
 #include <Arduino.h>
 
-#include <DHT.h>
 #include <GP2YDustSensor.h>
 #include <driver/ledc.h>
 #include <NTPClient.h>
@@ -10,25 +9,22 @@
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BMP280.h>
+#include <Adafruit_SHT31.h>
 
 #include "sw_fs.h"
 
 #pragma region Variable and Constant Definitions
 
-#define pin_dht11 23
 #define pin_dust_led 32
 #define pin_dust_v0 36
 #define pin_ws2812 26
 #define pin_fan 12
 #define pin_mist 14
 
-#define DHTPIN pin_dht11
-#define DHTTYPE DHT11
-
-DHT dht(DHTPIN, DHTTYPE);
+Adafruit_SHT31 sht31 = Adafruit_SHT31();
 
 int dly_loop = 580;
-int dly_dht = 3000;
+int dly_sht = 750;
 int dly_dust = 1000;
 
 float sens_temperature = 0;
@@ -971,7 +967,7 @@ void updateModeState()
 TaskHandle_t hndl_PushAll;
 TaskHandle_t hndl_UpdateLedC;
 TaskHandle_t hndl_DustSens;
-TaskHandle_t hndl_Dht11Sens;
+TaskHandle_t hndl_SHTSens;
 TaskHandle_t hndl_NTP;
 TaskHandle_t hndl_StreamRead;
 TaskHandle_t hndl_WS2812;
@@ -1066,19 +1062,31 @@ void Task_DustSensor(void *parameter)
   }
 }
 
-void Task_Dht11Sensor(void *parameter)
+void Task_ShtSensor(void *parameter)
 {
   (void)parameter;
 
-  dht.begin();
+  bool sensorFound = false;
+
+  while (!sensorFound)
+  {
+    if (sht31.begin(0x44))
+    {
+      sensorFound = true;
+    }
+    else
+    {
+      Serial.println("Couldn't find SHT30, retrying in 2 seconds...");
+      vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+  }
 
   for (;;)
   {
+    sens_temperature = sht31.readTemperature();
+    sens_humidity = sht31.readHumidity();
 
-    sens_temperature = dht.readTemperature(); // replace the random value with your sensor value
-    sens_humidity = dht.readHumidity();       // replace the random value  with your sensor value
-
-    vTaskDelay(pdMS_TO_TICKS(dly_dht));
+    vTaskDelay(pdMS_TO_TICKS(dly_sht));
   }
 }
 
@@ -1225,36 +1233,51 @@ void Task_BMP280(void *parameter)
     Serial.println("BMP280 Sensor 2 initialized successfully!");
   }
 
+  float bmp1_altitude = 0;
+  float bmp1_pressure = 0;
+  float bmp1_temperature = 0;
+  float bmp2_altitude = 0;
+  float bmp2_pressure = 0;
+  float bmp2_temperature = 0;
+
+  float pressure_drop_limit = 10;
+  float pressure_drop_current = 0;
+
   while (true)
   {
     if (!is_bmp1OK)
     {
       Serial.println("Sensor data retrieval error:");
-      Serial.println("Could not find a valid BMP280 sensor at address 0x76, check wiring!");
+      Serial.println("Could not find a valid BMP280 sensor at address 0x76, check the wiring!");
     }
     else
     {
-      float bmp1_altitude = bmpSensor1.readAltitude();
-      float bmp1_pressure = bmpSensor1.readPressure() / 100000.0; // Convert Pa to bars
-      float bmp1_temperature = bmpSensor1.readTemperature();
+      bmp1_altitude = bmpSensor1.readAltitude();
+      bmp1_pressure = bmpSensor1.readPressure() / 100000.0; // Convert Pa to bars
+      bmp1_temperature = bmpSensor1.readTemperature();
 
-      Serial.printf("1st bmp280: Altitude: %.2f meters, Pressure: %.5f bars, Temperature: %.2f °C\n",
-                    bmp1_altitude, bmp1_pressure, bmp1_temperature);
+      Serial.printf("1st bmp280: Altitude: %.2f meters, Pressure: %.5f bars, Temperature: %.2f °C\n", bmp1_altitude, bmp1_pressure, bmp1_temperature);
     }
 
     if (!is_bmp2OK)
     {
       Serial.println("Sensor data retrieval error:");
-      Serial.println("Could not find a valid BMP280 sensor at address 0x77, check wiring!");
+      Serial.println("Could not find a valid BMP280 sensor at address 0x77, check the wiring!");
     }
     else
     {
-      float bmp2_altitude = bmpSensor2.readAltitude();
-      float bmp2_pressure = bmpSensor2.readPressure() / 100000.0; // Convert Pa to bars
-      float bmp2_temperature = bmpSensor2.readTemperature();
+      bmp2_altitude = bmpSensor2.readAltitude();
+      bmp2_pressure = bmpSensor2.readPressure() / 100000.0; // Convert Pa to bars
+      bmp2_temperature = bmpSensor2.readTemperature();
 
-      Serial.printf("2nd bmp280: Altitude: %.2f meters, Pressure: %.5f bars, Temperature: %.2f °C\n",
-                    bmp2_altitude, bmp2_pressure, bmp2_temperature);
+      Serial.printf("2nd bmp280: Altitude: %.2f meters, Pressure: %.5f bars, Temperature: %.2f °C\n", bmp2_altitude, bmp2_pressure, bmp2_temperature);
+    }
+
+    if (bmp1_pressure > 0 && bmp2_pressure > 0)
+    {
+      pressure_drop_current = bmp2_pressure - bmp1_pressure;
+
+      Serial.printf("current pressure drop: %.5f bars, and the limit for filter change is: %.5f bars\n", pressure_drop_current, pressure_drop_limit);
     }
 
     vTaskDelay(dly_loop); // Delay for 1000 ms
@@ -1275,7 +1298,7 @@ void check_stackUsage()
   Serial.print("hndl_UpdateLedC usage: ");
   Serial.print(stackUsage);
   Serial.println(" words");
-  stackUsage = uxTaskGetStackHighWaterMark(hndl_Dht11Sens);
+  stackUsage = uxTaskGetStackHighWaterMark(hndl_SHTSens);
   Serial.print("hndl_Dht11Sens usage: ");
   Serial.print(stackUsage);
   Serial.println(" words");
@@ -1309,7 +1332,7 @@ void setup()
   client.setCallback(mqttCallback);
 
   xTaskCreate(Task_DustSensor, "Task_dustSensor", 4096, NULL, 10, &hndl_DustSens);
-  xTaskCreate(Task_Dht11Sensor, "Task_dht11Sensor", 4096, NULL, 15, &hndl_Dht11Sens);
+  xTaskCreate(Task_ShtSensor, "Task_ShtSensor", 4096, NULL, 15, &hndl_SHTSens);
   xTaskCreate(Task_PushAll, "Task_PushAll", 4096, NULL, 20, &hndl_PushAll);
   xTaskCreate(Task_UpdateLedC, "Task_UpdateLedC", 4096, NULL, 20, &hndl_UpdateLedC);
   xTaskCreate(Task_NTP, "Task_NTP", 4096, NULL, 20, &hndl_NTP);
