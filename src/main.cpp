@@ -15,11 +15,13 @@
 
 #pragma region Variable and Constant Definitions
 
-#define pin_dust_led 32
-#define pin_dust_v0 36
-#define pin_ws2812 26
-#define pin_fan 12
-#define pin_mist 14
+#define pin_dust_led 12 // Dust sensor LED pin
+#define pin_dust_v0 14  // Dust sensor analog output pin
+#define pin_ws2812 13   // WS2812 LED strip data pin
+#define pin_fan 33      // Fan control pin
+#define pin_mist 32     // Mist control pin
+#define pin_ZC_In 27    // Zero-cross input pin for AC motor control
+#define pin_ZC_Out 26   // Output pin for AC motor control
 
 Adafruit_SHT31 sht31 = Adafruit_SHT31();
 
@@ -123,6 +125,17 @@ uint8_t ledBrightnes_current = 128; // Initial brightness value (0-255)
 Adafruit_BMP280 bmpSensor1; // Initialize the first BMP280 sensor object
 Adafruit_BMP280 bmpSensor2; // Initialize the second BMP280 sensor object
 
+int acFrequency = 50;                                // Initial AC frequency in Hz
+int halfPeriodMicros_max = 500000 / acFrequency;     // Calculate half period in microseconds (initial value)
+const int ZC_periodComp = 2;                         // Compensation value for adjusting the ZC_Delay
+int ZC_Delay = halfPeriodMicros_max - ZC_periodComp; // Current delay for motor control (initial value)
+
+int ZC_Last;                   // Timestamp of the last zero-cross detection
+const int ZC_Counter_max = 10; // Maximum counter value for frequency measurement
+int ZC_Counter_cur;            // Current counter value
+
+volatile bool is_frequencyRead = false; // Flag indicating if frequency measurement task should be executed
+
 #pragma endregion
 
 #pragma region PWM Outputs
@@ -141,14 +154,15 @@ int fanSpeedManual = 0;
 int humidifierIntensityManual = 0;
 
 // LEDC configuration variables
-int ledcFrequency = 5000; // Frequency in Hz
-int ledcResolution = 8;   // Bit resolution (0-15)
+int ledcFrequency_fan = 100;  // Frequency in Hz
+int ledcFrequency_hum = 5000; // Frequency in Hz
+int ledcResolution = 8;       // Bit resolution (0-15)
 
 void setup_ledc()
 {
   // Initialize LEDC library
-  ledcSetup(FAN_CHANNEL, ledcFrequency, ledcResolution);        // Fan channel
-  ledcSetup(HUMIDIFIER_CHANNEL, ledcFrequency, ledcResolution); // Humidifier channel
+  ledcSetup(FAN_CHANNEL, ledcFrequency_fan, ledcResolution);        // Fan channel
+  ledcSetup(HUMIDIFIER_CHANNEL, ledcFrequency_hum, ledcResolution); // Humidifier channel
 
   // Attach GPIO pins to LEDC channels
   ledcAttachPin(FAN_PIN, FAN_CHANNEL);
@@ -160,7 +174,8 @@ void setup_ledc()
 // Function to start the fan
 void startFan(int speed)
 {
-  fanSpeed = speed; // Set fan speed to maximum
+  fanSpeed = speed;                                                          // Set fan speed for ledc
+  ZC_Delay = map(fanSpeed, 0, 255, 0, halfPeriodMicros_max - ZC_periodComp); // Calculate delay for Zero-Cross circuit
 }
 
 // Function to stop the fan
@@ -873,6 +888,73 @@ void analyze_AirQuality_Trends()
 
 #pragma endregion
 
+#pragma region ZeroCross
+
+TaskHandle_t hndl_ZC_Trigger;
+TaskHandle_t hndl_ZC_FrequencySet;
+
+void ZC_FrequencySetFunction(void *parameter)
+{
+  int zc_temp = micros();
+
+  if (ZC_Counter_cur >= ZC_Counter_max)
+  {
+    is_frequencyRead = true; // Set the flag to indicate that frequency measurement is complete
+  }
+  else if (ZC_Counter_cur == 1)
+  {
+    ZC_Delay = zc_temp - ZC_Last; // Calculate the first delay after zero-cross detection
+    halfPeriodMicros_max = ZC_Delay;
+  }
+  else if (ZC_Counter_cur >= 2)
+  {
+    ZC_Delay = zc_temp - ZC_Last;                                 // Calculate the subsequent delays after zero-cross detection
+    halfPeriodMicros_max = (halfPeriodMicros_max + ZC_Delay) / 2; // Average the calculated delays
+    acFrequency = 500000 / halfPeriodMicros_max;                  // Update AC frequency based on the calculated half period
+  }
+  ZC_Counter_cur++;
+
+  ZC_Last = zc_temp; // Update the timestamp of the last zero-cross detection
+
+  vTaskDelete(hndl_ZC_FrequencySet); // Delete the task after execution
+}
+
+void ZC_TriggerFunction(void *parameter)
+{
+  // Handle motor control logic
+  if (fanSpeed >= 0)
+  {
+    digitalWrite(pin_ZC_Out, HIGH); // Turn on motor (or apply your control logic)
+    delayMicroseconds(ZC_Delay);    // Adjust this delay based on your motor requirements
+    digitalWrite(pin_ZC_Out, LOW);  // Turn off motor (or apply your control logic)
+  }
+
+  vTaskDelete(hndl_ZC_Trigger); // Delete the task after execution
+}
+
+void IRAM_ATTR ZC_Interrupt()
+{
+  // Trigger a task from the interrupt
+  if (is_frequencyRead)
+  {
+    xTaskCreatePinnedToCore(ZC_TriggerFunction, "ZC_Trigger", 4096, NULL, 1, &hndl_ZC_Trigger, 0);
+  }
+  else
+  {
+    xTaskCreatePinnedToCore(ZC_FrequencySetFunction, "ZC_FrequencySetFunction", 4096, NULL, 1, &hndl_ZC_FrequencySet, 0);
+  }
+}
+
+void setup_ZeroCross()
+{
+  pinMode(pin_ZC_In, INPUT);
+  attachInterrupt(digitalPinToInterrupt(pin_ZC_In), ZC_Interrupt, RISING);
+
+  pinMode(pin_ZC_Out, OUTPUT);
+}
+
+#pragma endregion
+
 #pragma region Tasks
 
 void updateModeState()
@@ -1007,10 +1089,6 @@ void Task_PushAll(void *parameter)
 
     // Update mode state to calculate fan speed and humidifier intensity
     updateModeState();
-
-    // Control the fan and humidifier based on the variables
-    // ledcWrite(FAN_CHANNEL, fanSpeed);
-    // ledcWrite(HUMIDIFIER_CHANNEL, humidifierIntensity);
 
     vTaskDelay(pdMS_TO_TICKS(dly_loop));
   }
@@ -1321,6 +1399,9 @@ void setup()
 
   Serial.println("setup_webserver");
   setup_WebServer();
+
+  Serial.println("setup_ZeroCross");
+  setup_ZeroCross();
 
 #ifdef ESP8266
   espClient.setInsecure();
